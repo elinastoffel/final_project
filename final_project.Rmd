@@ -9,7 +9,7 @@ Elina Stoffel (es3866), Devon Park (dap2189), Olivia Martinez (om2372), Diane Be
 
 Tentative project title: Pre- and Post-Transplant Outcomes in Alcohol-Associated Liver Disease: Insights from the UNOS dataset
 
-The motivation for this project: By learning how to clean and analyze larger datasets from online registries, we believe this will equip us to become 
+The motivation for this project: By learning how to clean and analyze larger datasets from online registries, we will gain experience in coding.
 
 The intended final products: We plan to produce a reproducible R Markdown report and webpage including cleaned data, analysis, and visualizations from the SRTR database. The report will include a table with demographics, outcomes, and statistical analyses including a regression or survival analysis. Finally, there will be an interpretation of our data to be discussed in class.
 
