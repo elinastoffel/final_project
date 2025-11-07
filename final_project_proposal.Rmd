@@ -1,6 +1,6 @@
 ---
 title: "Final Project Proposal"
-output: html_document
+output: github_document
 date: "2025-11-05"
 ---
 ## Exploring Liver Transplants: Insights from the UNOS dataset
