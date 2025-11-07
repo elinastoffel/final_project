@@ -1,0 +1,43 @@
+---
+title: "Final Project Proposal"
+output: html_document
+date: "2025-11-05"
+---
+## Exploring Liver Transplants: Insights from the UNOS dataset
+
+### Group Members:
+- Elina Stoffel (es3866)
+- Devon Park (dap2189)
+- Olivia Martinez (om2372)
+- Diane Benites (dmb2257)
+
+### Motivations for this project: 
+Liver disease is one of the top 10 causes of death in the United States. Rising rates of liver disease on their own are a public health concern; however, with transplantation as the only curative treatment, issues of health equity, access, and health outcomes also need to be investigated. By examining the Scientific Registry of Transplant Recipients (SRTR) database, we hope to explore trends and disparities in liver transplant outcomes.  Utilizing skills we’ve learned throughout the semester—such as tidying data, visualization, website creation, and exploratory analysis—we hope to understand how various factors influence survival outcomes. Only from understanding trends can we inform equitable data-driven improvements to how we manage liver disease and transplant practices. 
+
+### Data Sources
+
+We plan o using data from SRTR. This provides us with de-identified data from the SRTR transplant registry. 
+
+### Intended final products and deliverables:
+
+Our overarching goal is to produce a website where people can learn about liver disease in the US, explore trends, and gain insights on liver disease management and transplantation practices in the US. We plan to produce a reproducible R Markdown report and webpage including cleaned data, analysis, and visualizations from the [SRTR database](https://www.srtr.org/requesting-srtr-data/saf-data-dictionary/). The report will ideally include a table with demographics, outcomes, and a form of statistical analyses including a regression or survival analysis by transplant diagnosis. Finally, there will be an interpretation of our data to be discussed in class.
+
+##### Planned analyses:
+- Cleaning/filtering of the dataset to identify adult liver transplant recipients with ALD
+- Selecting key predictors and outcomes variables to assess (e.g. age, MELD score, co-morbidities across ALD vs non-ALD groups)
+- Post-transplant survival using Kaplam Meier curve or Cox proportional hazards model
+
+##### Visualisations:
+The visualization graphs can be used to compare the distribution and relationships between several variables related to liver health and transplants. For example, they can show how alcohol use affects liver function or transplant outcomes and how these effects differ by the location of the transplant center, the presence of fatty liver disease, or hepatitis status. The data can also be examined over time and across factors such as age, gender, and geographic region within the United States to identify patterns that may influence liver disease prevalence and treatment outcomes. 
+
+##### Anticipated Challenges
+Anticipated coding challenges include cleaning the data from this larger dataset. We will need to properly handle any missing or inconsistent data points and determine how we will filter the data necessary for our analyses. We will also need to determine how to make the visualizations as user-friendly as possible. 
+
+
+### Expected Timeline:
+1. Week 1 (11/2 - 11/7): Obtain the dataset and prepare the project proposal.
+2. Week 2 (11/9 - 11/15): Data-cleaning and initial exploratory analysis of the dataset. 
+3. Week 3 (11/16 - 11/22): Perform analysis of liver transplant outcomes and produce initial visualizations of transplant distributions. 
+4. Week 4 (11/23 - 11/29): Create webpage and screencast. 
+5. Week 5 (11/30 - 12/5): Compile report. Polish visuals and webpage. 
+6. Week 6 (12/7 - 12/10): Prepare for in-class discussion of the final project
