@@ -3,3 +3,14 @@ title: "Devon's_Playaround_space"
 output: html_document
 date: "2025-11-13"
 ---
+
+
+```{r}
+ library(haven)
+library(tidyverse)
+```
+
+
+```{r}
+liver_Data = read_sas("/Users/devonpark/Library/CloudStorage/OneDrive-ColumbiaUniversityIrvingMedicalCenter/tx_li.sas7bdat")
+```
