@@ -12,5 +12,111 @@ library(tidyverse)
 
 
 ```{r}
-liver_Data = read_sas("/Users/devonpark/Library/CloudStorage/OneDrive-ColumbiaUniversityIrvingMedicalCenter/tx_li.sas7bdat")
+liver_data = read_sas("/Users/devonpark/Library/CloudStorage/OneDrive-ColumbiaUniversityIrvingMedicalCenter/tx_li.sas7bdat")
+
+liver_data = liver_data |> 
+  janitor::clean_names()
 ```
+
+
+Looking at race:
+```{r}
+#Clean don_Race column
+
+liver_data_clean = 
+liver_data |> 
+  mutate(
+    
+    don_race_raw = don_race,#Clean original race codes
+    true_missing = is.na(don_race_raw) | don_race_raw %in% c("NA", "", " "), # 2. Identify TRUE missing before numeric conversion
+   
+    don_race_num = suppressWarnings(as.numeric(trimws(as.character(don_race_raw)))),  #Converts to numeric (will produce NA for non-numeric multi-racial codes)
+
+    don_race = case_when(
+      don_race_num == 8 ~ "White",
+      don_race_num == 16 ~ "Black or African American",
+      don_race_num == 32 ~ "American Indian or Alaska Native",
+      don_race_num == 64 ~ "Asian",
+      don_race_num == 128 ~ "Native Hawaiian or Other Pacific Islander",
+      don_race_num == 256 ~ "Arab or Middle Eastern",
+      don_race_num == 512 ~ "Indian Sub-continent",
+      don_race_num == 1024 ~ "Unknown (for Donor Referral only)",
+      don_race_num == 2000 ~ "Hispanic/Latino",
+
+      don_race_num %in% c(24, 40, 48, 56, 72, 80, 88, 96, 104, 112, 120, 
+                          136, 144, 192, 200, 232) ~ "Multi-Racial",
+
+      true_missing ~ "Missing", #see if there are TRUE missing BEFORE numeric conversion
+
+      is.na(don_race_num) ~ "Multi-Racial", #Numeric conversion failures → Multi-Racial (your new rule)
+
+      TRUE ~ as.character(don_race_raw) #Fallback in case
+    )
+  ) 
+  
+```
+
+
+
+```{r}
+liver_data_clean |> 
+  distinct(don_race_srtr)
+
+liver_data_clean = 
+  liver_data_clean |>
+    mutate(
+      don_race_srtr_std = don_race_srtr,
+      don_race_srtr_std = case_when(
+        don_race_srtr_std == "ASIAN"   ~ "Asian",
+        don_race_srtr_std == "WHITE"   ~ "White",
+        don_race_srtr_std == "BLACK"   ~ "Black or African American",
+        don_race_srtr_std == "NATIVE"  ~ "American Indian or Alaska Native",
+        don_race_srtr_std == "MULTI"   ~ "Multi-Racial",
+        don_race_srtr_std == "PACIFIC" ~ "Native Hawaiian or Other Pacific Islander",
+        don_race_srtr_std == ""        ~ "NOT SPECIFIED",
+        TRUE ~ don_race_srtr_std #For all rows that did not match any of the previous recoding conditions, keep the original value
+      )
+    )
+  
+
+```
+
+```{r}
+# Visualise don_race
+
+liver_data_clean |>
+  count(don_race, sort = TRUE) |>
+  mutate(pct = n / sum(n) * 100) |>
+  ggplot(aes(x = n, y = reorder(don_race, n))) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = paste0(round(pct, 3), "%")), 
+            hjust = -0.1, size = 3.5) +
+  labs(
+    title = "Distribution of Donor Race",
+    x = "Count",
+    y = "Race"
+  ) +
+  theme_minimal() +
+  xlim(0, max(liver_data_clean |> count(don_race) |> pull(n)) * 1.15)
+```
+
+
+Plot for don_Race_srtr_std:
+```{r}
+
+```
+
+
+Check for mismatches between don_race and don_race_srtr (but actually don_Race_srtr_std)
+```{r}
+
+mismatched_race = 
+  liver_data_clean |> 
+  select(pers_id, don_race, don_race_srtr_std) |>
+  mutate(
+    race_match = don_race == don_race_srtr_std #creates a logical vector
+  ) |> 
+  filter(race_match == FALSE)
+
+```
+
