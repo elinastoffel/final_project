@@ -154,3 +154,54 @@ mismatched_race_y =
 
 ```
 
+
+Look at deceased vs living donors 
+
+```{r}
+liver_data_clean |> count(don_ty)
+liver_data_clean |> count(don_gender)
+liver_data_clean |> filter(don_ty == "L" | don_ty == "C") |> count(don_gender)
+liver_data_clean |> filter(don_ty == "C") |> count(don_gender)
+liver_data_clean |> filter(don_ty == "L") |> count(don_gender)
+
+```
+
+Plot for DECEASED don_Race_srtr_std:
+```{r}
+liver_data_clean |>
+  filter(don_ty == "C") |> 
+  count(don_race_srtr_std, sort = TRUE) |>
+  mutate(pct = n / sum(n) * 100) |>
+  ggplot(aes(x = n, y = reorder(don_race_srtr_std, n))) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = paste0(round(pct, 2), "%")), 
+            hjust = -0.1, size = 3.5) +
+  labs(
+    title = "Distribution of Deceased Donor Race",
+    x = "Count",
+    y = "Race"
+  ) +
+  theme_minimal() +
+  xlim(0, 160000)
+```
+
+
+Plot for DECEASED don_Race_srtr_std:
+```{r}
+liver_data_clean |>
+  filter(don_ty == "L") |> 
+  count(don_race_srtr_std, sort = TRUE) |>
+  mutate(pct = n / sum(n) * 100) |>
+  ggplot(aes(x = n, y = reorder(don_race_srtr_std, n))) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = paste0(round(pct, 2), "%")), 
+            hjust = -0.1, size = 3.5) +
+  labs(
+    title = "Distribution of Living Donor Race",
+    x = "Count",
+    y = "Race"
+  ) +
+  theme_minimal() +
+  xlim(0, 10000)
+```
+
