@@ -1,0 +1,494 @@
+---
+title:  "Waitlist Mortality in Alcohol-Related Liver Disease by Sex (2020+)"
+author: "Elina"
+date: "2025-12-02"
+output: github_document
+---
+
+
+
+```{r setup, echo=FALSE, warning=FALSE, message=FALSE}
+library(haven)
+library(tidyverse)
+library(lubridate)
+library(survival)
+library(survminer)
+library(broom)
+library(gtsummary)
+library(gt)
+```
+
+```{r load-data, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+# Load both files
+liver_data <- read_sas("data/tx_li.sas7bdat")
+cand_liin <- read_sas("data/cand_liin.sas7bdat")
+
+# Extract only needed variables from tx_li (person-level death and transplant dates)
+tx_data_slim <- liver_data %>%
+  group_by(PERS_ID) %>%
+  arrange(REC_TX_DT) %>%
+  summarise(
+    first_tx_date = first(REC_TX_DT),
+    tfl_death_date = first(TFL_DEATH_DT),
+    .groups = 'drop'
+  ) %>%
+  mutate(
+    first_tx_date = as.Date(first_tx_date),
+    tfl_death_date = as.Date(tfl_death_date)
+  )
+
+# Merge and keep only needed variables from cand_liin
+waitlist_data <- cand_liin %>%
+  select(
+    # Identifiers
+    PERS_ID, PX_ID,
+    
+    # Demographics
+    CAN_GENDER, CAN_RACE_SRTR, CAN_ETHNICITY_SRTR, CAN_AGE_AT_LISTING,
+    
+    # Dates
+    CAN_LISTING_DT, CAN_REM_DT, CAN_DEATH_DT,
+    
+    # Removal information
+    CAN_REM_CD,
+    
+    # Diagnosis
+    CAN_DGN, CAN_DGN2,
+    
+    # MELD scores
+    CAN_INIT_SRTR_LAB_MELD, CAN_LAST_SRTR_LAB_MELD
+  ) %>%
+  # Merge death and transplant dates
+  left_join(tx_data_slim, by = "PERS_ID") %>%
+  mutate(
+    # Convert dates
+    listing_date = as.Date(CAN_LISTING_DT),
+    listing_year = year(listing_date),
+    removal_date = as.Date(CAN_REM_DT),
+    can_death_date = as.Date(CAN_DEATH_DT),
+    
+    # Combine death dates (use most complete)
+    death_date = coalesce(can_death_date, tfl_death_date)
+  )
+```
+
+
+```{r prepare-data, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+# Function to identify alcohol-related liver disease
+is_alcohol_related <- function(can_dgn, can_dgn2) {
+  alcohol_codes <- c(4215, 4216, 4217)  # All alcohol-related codes
+  any(c(can_dgn, can_dgn2) %in% alcohol_codes, na.rm = TRUE)
+}
+
+waitlist_cohort <- waitlist_data %>%
+  filter(
+    !is.na(PERS_ID),
+    !is.na(listing_date),
+    listing_year >= 2020,
+    CAN_AGE_AT_LISTING >= 18
+  ) %>%
+  # First listing per person
+  group_by(PERS_ID) %>%
+  arrange(listing_date) %>%
+  slice(1) %>%
+  ungroup() %>%
+  rowwise() %>%
+  mutate(
+    # Identify ALD
+    ALD_at_listing = is_alcohol_related(CAN_DGN, CAN_DGN2),
+    
+    # Demographics
+    sex = factor(case_when(
+      CAN_GENDER == "M" ~ "Male",
+      CAN_GENDER == "F" ~ "Female"
+    ), levels = c("Male", "Female")),
+    
+    race_eth = factor(case_when(
+      CAN_ETHNICITY_SRTR == "LATINO" ~ "Hispanic",
+      CAN_RACE_SRTR == "WHITE" & CAN_ETHNICITY_SRTR == "NLATIN" ~ "Non-Hispanic White",
+      CAN_RACE_SRTR == "BLACK" & CAN_ETHNICITY_SRTR == "NLATIN" ~ "Non-Hispanic Black",
+      CAN_RACE_SRTR %in% c("ASIAN", "MULTI", "NATIVE", "PACIFIC") & CAN_ETHNICITY_SRTR == "NLATIN" ~ "Non-Hispanic Other"
+    ), levels = c("Non-Hispanic White", "Non-Hispanic Black", "Non-Hispanic Other", "Hispanic")),
+    
+    # MELD at listing (initial MELD)
+    meld_at_listing = as.integer(substr(CAN_INIT_SRTR_LAB_MELD, 3, 4)),
+    meld_clean = ifelse(meld_at_listing >= 6 & meld_at_listing <= 40, meld_at_listing, NA),
+    
+    age_at_listing = CAN_AGE_AT_LISTING
+  ) %>%
+  ungroup() %>%
+  filter(ALD_at_listing == TRUE)
+
+```
+
+```{r create-cohort, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+# Define waitlist mortality outcomes
+waitlist_survival <- waitlist_cohort %>%
+  mutate(
+    dataset_update_date = as.Date("2025-03-02"),
+    
+    # Define waitlist death
+    # A patient died on the waitlist if they died BEFORE being transplanted
+    waitlist_death = case_when(
+      # Died and never transplanted
+      !is.na(death_date) & is.na(first_tx_date) ~ 1,
+      # Died before transplant date
+      !is.na(death_date) & !is.na(first_tx_date) & death_date < first_tx_date ~ 1,
+      # Otherwise, not a waitlist death
+      TRUE ~ 0
+    ),
+    
+    # Define event date for survival analysis
+    event_date = case_when(
+      # If died on waitlist, use death date
+      waitlist_death == 1 ~ death_date,
+      # If transplanted, use transplant date (censored)
+      !is.na(first_tx_date) ~ first_tx_date,
+      # If removed for other reason, use removal date (censored)
+      !is.na(removal_date) ~ removal_date,
+      # Still listed, use dataset update date (censored)
+      TRUE ~ dataset_update_date
+    ),
+    
+    # Calculate follow-up time
+    followup_days = as.numeric(difftime(event_date, listing_date, units = "days")),
+    followup_years = followup_days / 365.25
+  ) %>%
+  # Filter to valid follow-up and complete cases
+  filter(
+    followup_days > 0,
+    !is.na(sex),
+    !is.na(meld_clean),
+    !is.na(age_at_listing)
+  )
+
+
+# Detailed breakdown of outcomes
+
+outcome_summary <- waitlist_survival %>%
+  summarise(
+    Total = n(),
+    Transplanted = sum(!is.na(first_tx_date) & waitlist_death == 0),
+    Died_Waitlist = sum(waitlist_death == 1),
+    Removed_Other = sum(is.na(first_tx_date) & waitlist_death == 0 & !is.na(removal_date)),
+    Still_Listed = sum(is.na(first_tx_date) & is.na(removal_date) & waitlist_death == 0)
+  )
+outcome_summary
+
+# By sex
+
+sex_mortality <- waitlist_survival %>%
+  group_by(sex) %>%
+  summarise(
+    N = n(),
+    Deaths = sum(waitlist_death),
+    Death_Rate = sprintf("%.1f%%", 100 * mean(waitlist_death)),
+    Median_MELD = median(meld_clean, na.rm = TRUE),
+    Median_Age = median(age_at_listing, na.rm = TRUE),
+    Median_Followup_Years = round(median(followup_years, na.rm = TRUE), 2)
+  )
+sex_mortality
+
+# Distribution of removal codes
+removal_codes <- waitlist_survival %>%
+  count(CAN_REM_CD, sort = TRUE) %>%
+  mutate(
+    Percent = sprintf("%.1f%%", 100 * n / sum(n)),
+    Code_Description = case_when(
+      CAN_REM_CD == 4 ~ "Transplanted",
+      CAN_REM_CD == 5 ~ "Died",
+      CAN_REM_CD == 8 ~ "Too sick",
+      CAN_REM_CD == 9 ~ "Medically unsuitable",
+      CAN_REM_CD == 12 ~ "Other",
+      CAN_REM_CD == 13 ~ "Condition improved",
+      CAN_REM_CD == 14 ~ "Refused transplant",
+      CAN_REM_CD == 15 ~ "Patient choice",
+      is.na(CAN_REM_CD) ~ "Still listed",
+      TRUE ~ as.character(CAN_REM_CD)
+    )
+  )
+removal_codes
+```
+
+
+## Characteristics by ALD etiology
+```{r, echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+# Create diagnosis subgroups
+waitlist_survival <- waitlist_survival %>%
+  mutate(
+    alcohol_subtype = case_when(
+      CAN_DGN %in% c(4215, 4216) | CAN_DGN2 %in% c(4215, 4216) ~ "Alcohol-related Cirrhosis",
+      CAN_DGN == 4217 | CAN_DGN2 == 4217 ~ "Acute Alcohol-related Hepatitis",
+      TRUE ~ "Other"
+    ),
+    # More detailed categorization
+    alcohol_detailed = case_when(
+      CAN_DGN == 4215 | CAN_DGN2 == 4215 ~ "Alcohol-related Cirrhosis (pure)",
+      CAN_DGN == 4216 | CAN_DGN2 == 4216 ~ "Alcohol-related Cirrhosis + HCV",
+      CAN_DGN == 4217 | CAN_DGN2 == 4217 ~ "Acute Alcohol-related Hepatitis",
+      TRUE ~ "Other"
+    )
+  )
+
+```
+
+```{r,echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+# Summary by diagnosis subtype and sex
+subtype_summary <- waitlist_survival %>%
+  group_by(alcohol_subtype, sex) %>%
+  summarise(
+    N = n(),
+    Deaths = sum(waitlist_death),
+    Death_Rate = sprintf("%.1f%%", 100 * mean(waitlist_death)),
+    Median_Age = round(median(age_at_listing, na.rm = TRUE), 1),
+    Median_MELD = round(median(meld_clean, na.rm = TRUE), 1),
+    Median_Followup_Days = round(median(followup_days, na.rm = TRUE), 0),
+    .groups = 'drop'
+  ) %>%
+  arrange(alcohol_subtype, sex)
+
+subtype_summary
+
+# Detailed breakdown
+
+detailed_summary <- waitlist_survival %>%
+  group_by(alcohol_detailed, sex) %>%
+  summarise(
+    N = n(),
+    Deaths = sum(waitlist_death),
+    Death_Rate = sprintf("%.1f%%", 100 * mean(waitlist_death)),
+    Median_Age = round(median(age_at_listing, na.rm = TRUE), 1),
+    Median_MELD = round(median(meld_clean, na.rm = TRUE), 1),
+    .groups = 'drop'
+  ) %>%
+  arrange(alcohol_detailed, sex)
+
+detailed_summary
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Create comprehensive Table 1 stratified by diagnosis subtype
+table1_subtype <- waitlist_survival %>%
+  filter(alcohol_subtype != "Other") %>%  # Exclude "Other" if any
+  select(alcohol_subtype, sex, age_at_listing, meld_clean, race_eth, 
+         waitlist_death, followup_years) %>%
+  tbl_summary(
+    by = alcohol_subtype,
+    label = list(
+      sex ~ "Sex",
+      age_at_listing ~ "Age at Listing (years)",
+      meld_clean ~ "MELD at Listing",
+      race_eth ~ "Race/Ethnicity",
+      waitlist_death ~ "Waitlist Death",
+      followup_years ~ "Follow-up Time (years)"
+    ),
+    statistic = list(
+      all_continuous() ~ "{median} ({p25}, {p75})",
+      all_categorical() ~ "{n} ({p}%)"
+    )
+  ) %>%
+  add_overall() %>%
+  add_p() %>%
+  modify_header(label ~ "**Characteristic**")
+
+table1_subtype
+```
+
+## Descriptive Tables of ALD-Etiologies Stratified by Sex
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Create Tables stratified by sex (overall)
+table_by_sex <- waitlist_survival %>%
+  filter(alcohol_subtype != "Other") %>%
+  select(sex, age_at_listing, meld_clean, race_eth, alcohol_subtype,
+         waitlist_death, followup_years) %>%
+  tbl_summary(
+    by = sex,
+    label = list(
+      age_at_listing ~ "Age at Listing (years)",
+      meld_clean ~ "MELD at Listing",
+      race_eth ~ "Race/Ethnicity",
+      alcohol_subtype ~ "Diagnosis",
+      waitlist_death ~ "Waitlist Death",
+      followup_years ~ "Follow-up Time (years)"
+    ),
+    statistic = list(
+      all_continuous() ~ "{median} ({p25}, {p75})",
+      all_categorical() ~ "{n} ({p}%)"
+    )
+  ) %>%
+  add_overall() %>%
+  add_p() %>%
+  modify_header(label ~ "**Characteristic**") %>%
+  modify_spanning_header(c("stat_1", "stat_2") ~ "**Sex**") %>%
+  bold_labels() %>%
+  bold_p(t = 0.05)
+
+table_by_sex
+
+# Create separate tables by diagnosis subtype, stratified by sex
+table_cirrhosis_sex <- waitlist_survival %>%
+  filter(alcohol_subtype == "Alcohol-related Cirrhosis") %>%
+  select(sex, age_at_listing, meld_clean, race_eth, 
+         waitlist_death, followup_years) %>%
+  tbl_summary(
+    by = sex,
+    label = list(
+      age_at_listing ~ "Age at Listing (years)",
+      meld_clean ~ "MELD at Listing",
+      race_eth ~ "Race/Ethnicity",
+      waitlist_death ~ "Waitlist Death",
+      followup_years ~ "Follow-up Time (years)"
+    ),
+    statistic = list(
+      all_continuous() ~ "{median} ({p25}, {p75})",
+      all_categorical() ~ "{n} ({p}%)"
+    )
+  ) %>%
+  add_overall() %>%
+  add_p() %>%
+  modify_header(label ~ "**Characteristic**") %>%
+  modify_caption("**Alcohol-related Cirrhosis: Comparison by Sex**") %>%
+  modify_spanning_header(c("stat_1", "stat_2") ~ "**Sex**") %>%
+  bold_labels() %>%
+  bold_p(t = 0.05)
+
+table_cirrhosis_sex
+
+
+table_aah_sex <- waitlist_survival %>%
+  filter(alcohol_subtype == "Acute Alcohol-related Hepatitis") %>%
+  select(sex, age_at_listing, meld_clean, race_eth, 
+         waitlist_death, followup_years) %>%
+  tbl_summary(
+    by = sex,
+    label = list(
+      age_at_listing ~ "Age at Listing (years)",
+      meld_clean ~ "MELD at Listing",
+      race_eth ~ "Race/Ethnicity",
+      waitlist_death ~ "Waitlist Death",
+      followup_years ~ "Follow-up Time (years)"
+    ),
+    statistic = list(
+      all_continuous() ~ "{median} ({p25}, {p75})",
+      all_categorical() ~ "{n} ({p}%)"
+    )
+  ) %>%
+  add_overall() %>%
+  add_p() %>%
+  modify_header(label ~ "**Characteristic**") %>%
+  modify_caption("**Acute Alcohol-related Hepatitis: Comparison by Sex**") %>%
+  modify_spanning_header(c("stat_1", "stat_2") ~ "**Sex**") %>%
+  bold_labels() %>%
+  bold_p(t = 0.05)
+
+table_aah_sex
+```
+
+
+## Kaplan-Meier curves of Waitlist Mortality
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Kaplan-Meier curves: Alcohol-related Cirrhosis by Sex
+cirrhosis_data <- waitlist_survival %>%
+  filter(alcohol_subtype == "Alcohol-related Cirrhosis")
+
+if(nrow(cirrhosis_data) > 0 && sum(cirrhosis_data$waitlist_death) >= 5) {
+  fit_cirrhosis <- survfit(Surv(followup_years, waitlist_death) ~ sex, 
+                           data = cirrhosis_data)
+  
+  p_cirrhosis <- ggsurvplot(
+    fit_cirrhosis,
+    data = cirrhosis_data,
+    risk.table = TRUE,
+    pval = TRUE,
+    conf.int = TRUE,
+    xlab = "Years Since Listing",
+    ylab = "Survival Probability",
+    title = "Waitlist Survival: Alcohol-related Cirrhosis by Sex",
+    legend.labs = c("Male", "Female"),
+    ggtheme = theme_bw()
+  )
+  
+  p_cirrhosis
+}
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Kaplan-Meier curves: Acute Alcohol-related Hepatitis by Sex
+aah_data <- waitlist_survival %>%
+  filter(alcohol_subtype == "Acute Alcohol-related Hepatitis")
+
+if(nrow(aah_data) > 0 && sum(aah_data$waitlist_death) >= 5) {
+  fit_aah <- survfit(Surv(followup_years, waitlist_death) ~ sex, 
+                     data = aah_data)
+  
+  p_aah <- ggsurvplot(
+    fit_aah,
+    data = aah_data,
+    risk.table = TRUE,
+    pval = TRUE,
+    conf.int = TRUE,
+    xlab = "Years Since Listing",
+    ylab = "Survival Probability",
+    title = "Waitlist Survival: Acute Alcohol-related Hepatitis by Sex",
+    legend.labs = c("Male", "Female"),
+    ggtheme = theme_bw()
+  )
+  
+  p_aah
+  
+}
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Multivariable Cox for Alcohol-related Cirrhosis
+if(nrow(cirrhosis_data) > 0 && sum(cirrhosis_data$waitlist_death) >= 10) {
+  cox_cirrhosis <- coxph(
+    Surv(followup_years, waitlist_death) ~ sex + age_at_listing + meld_clean,
+    data = cirrhosis_data
+  )
+  
+  cirrhosis_results <- cox_cirrhosis %>%
+    tbl_regression(
+      exponentiate = TRUE,
+      label = list(
+        sex ~ "Sex (Female vs Male)",
+        age_at_listing ~ "Age at Listing (per year)",
+        meld_clean ~ "MELD at Listing (per point)"
+      )
+    )
+  
+  cirrhosis_results
+  
+  # Extract key result
+  coef_sex <- summary(cox_cirrhosis)$coefficients["sexFemale", ]
+  hr_sex <- exp(coef_sex["coef"])
+  ci_lower <- exp(coef_sex["coef"] - 1.96 * coef_sex["se(coef)"])
+  ci_upper <- exp(coef_sex["coef"] + 1.96 * coef_sex["se(coef)"])
+}  # <- Added missing closing brace
+
+# Multivariable Cox for Acute Alcohol-related Hepatitis
+if(nrow(aah_data) > 0 && sum(aah_data$waitlist_death) >= 10) {
+  cox_aah <- coxph(
+    Surv(followup_years, waitlist_death) ~ sex + age_at_listing + meld_clean,
+    data = aah_data
+  )
+  
+  aah_results <- cox_aah %>%
+    tbl_regression(
+      exponentiate = TRUE,
+      label = list(
+        sex ~ "Sex (Female vs Male)",
+        age_at_listing ~ "Age at Listing (per year)",
+        meld_clean ~ "MELD at Listing (per point)"
+      )
+    )
+  
+  aah_results
+  
+  # Extract key result
+  coef_sex_aah <- summary(cox_aah)$coefficients["sexFemale", ]
+  hr_sex_aah <- exp(coef_sex_aah["coef"])
+  ci_lower_aah <- exp(coef_sex_aah["coef"] - 1.96 * coef_sex_aah["se(coef)"])
+  ci_upper_aah <- exp(coef_sex_aah["coef"] + 1.96 * coef_sex_aah["se(coef)"])
+}
+```
