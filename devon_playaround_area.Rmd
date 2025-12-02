@@ -155,7 +155,7 @@ mismatched_race_y =
 ```
 
 
-Look at deceased vs living donors 
+Look at deceased vs living donors and gender
 
 ```{r}
 liver_data_clean |> count(don_ty)
@@ -165,6 +165,78 @@ liver_data_clean |> filter(don_ty == "C") |> count(don_gender)
 liver_data_clean |> filter(don_ty == "L") |> count(don_gender)
 
 ```
+
+Look at citizenship
+```{r}
+liver_data_clean |> count(don_citizenship)
+#916 NA values
+
+#Code	Description
+#1	1: US Citizen
+#2	2: Resident Alien
+#3	3: Non-Resident Alien, Specify Country
+#4	4: Non-US Citizen/US Resident
+#5	5: Non-US Citizen/Non-US Resident
+#998	998: Unknown
+```
+
+
+Donor cause of death:
+```{r}
+
+liver_data_clean |> count(don_cad_don_cod)
+#7120 NA values
+
+#Code	Description
+#1	1: ANOXIA
+#2	2: CEREBROVASCULAR/STROKE
+#3	3: HEAD TRAUMA
+#4	4: CNS TUMOR
+#998	998: UNKNOWN
+#999	999: OTHER SPECIFY
+```
+
+
+Donor death Circumstance 
+```{r}
+
+liver_data_clean |> count(don_death_mech)
+
+#Code	Description
+#1	1: MVA
+#2	2: SUICIDE
+#3	3: HOMICIDE
+#4	4: CHILD-ABUSE
+#5	5: NON-MVA
+#6	6: DEATH FROM NATURAL CAUSES
+#997	997: NONE OF THE ABOVE
+#998	998: UNKNOWN
+```
+
+
+Donor death Mechanism
+```{r}
+
+liver_data_clean |> count(don_death_circum)
+
+#Code	Description
+#1	1: DROWNING
+#2	2: SEIZURE
+#3	3: DRUG INTOXICATION
+#4	4: ASPHYXIATION
+#5	5: CARDIOVASCULAR
+#6	6: ELECTRICAL
+#7	7: GUNSHOT WOUND
+#8	8: STAB
+#9	9: BLUNT INJURY
+#10	10: SIDS
+#11	11: INTRACRANIAL HEMORRHAGE/STROKE
+#12	12: DEATH FROM NATURAL CAUSES
+#995	995: 995-Gunshot/stab wound (Pre-OTIS)
+#997	997: NONE OF THE ABOVE
+#998	998: UNKNOWN
+```
+
 
 Plot for DECEASED don_Race_srtr_std:
 ```{r}
