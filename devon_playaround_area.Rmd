@@ -3,7 +3,7 @@ title: "Devon's_Playaround_space"
 output: html_document
 date: "2025-11-13"
 ---
-
+---- Specific to transplants -----
 
 ```{r}
  library(haven)
@@ -20,10 +20,15 @@ liver_data_raw = read_sas("/Users/devonpark/Library/CloudStorage/OneDrive-Columb
 ```{r}
 liver_data = liver_data_raw |> 
   mutate(tx_date = as.Date(REC_TX_DT),
-listing_date = as.Date(CAN_LISTING_DT),
-tx_year = year(tx_date),
-days_listed = as.numeric(difftime(tx_date, listing_date, units = "days"))) %>% # days on waitlist
-filter(!is.na(PERS_ID) & !is.na(tx_date) & tx_year >= 2002 & REC_AGE_AT_TX >= 18) %>%# MELD era only, Adults only
+        listing_date = as.Date(CAN_LISTING_DT),
+        tx_year = year(tx_date),
+        days_listed = as.numeric(difftime(tx_date, listing_date, units = "days")),
+        alcohol_subtype = case_when(
+                CAN_DGN %in% c(4215, 4216) | CAN_DGN2 %in% c(4215, 4216) ~ "Alcohol-related Cirrhosis",
+                CAN_DGN == 4217 | CAN_DGN2 == 4217 ~ "Acute Alcohol-related Hepatitis",
+                TRUE ~ "Other")) %>% # days on waitlist
+filter(!is.na(PERS_ID) & !is.na(tx_date) & tx_year >= 2020 & REC_AGE_AT_TX >= 18,
+      alcohol_subtype != "Other") |> # MELD era only, Adults only
 arrange(PERS_ID, tx_date) |> 
   janitor::clean_names()
 ```
