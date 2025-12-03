@@ -8,6 +8,13 @@ date: "2025-11-13"
 ```{r}
  library(haven)
 library(tidyverse)
+library(scales)
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(forcats)
+library(plotly)
+
 ```
 
 
@@ -16,6 +23,67 @@ liver_data_raw = read_sas("/Users/devonpark/Library/CloudStorage/OneDrive-Columb
 
 ```
 
+GENERAL:
+
+```{r}
+liver_data_1 = liver_data_raw |> 
+  mutate(tx_date = as.Date(REC_TX_DT),
+        listing_date = as.Date(CAN_LISTING_DT),
+        tx_year = year(tx_date),
+        days_listed = as.numeric(difftime(tx_date, listing_date, units = "days")),
+        alcohol_subtype = case_when(
+                CAN_DGN %in% c(4215, 4216) | CAN_DGN2 %in% c(4215, 4216) ~ "Alcohol-related Cirrhosis",
+                CAN_DGN == 4217 | CAN_DGN2 == 4217 ~ "Acute Alcohol-related Hepatitis",
+                TRUE ~ "Other")) %>% # days on waitlist
+filter(!is.na(PERS_ID) & !is.na(tx_date) & tx_year >= 2002 & REC_AGE_AT_TX >= 18,
+      alcohol_subtype != "Other") |> # MELD era only, Adults only
+arrange(PERS_ID, tx_date) |> 
+  janitor::clean_names()
+
+
+
+liver_data_clean_1 = 
+  liver_data_1 |>
+    mutate(
+      don_race_srtr_std = don_race_srtr,
+      don_race_srtr_std = case_when(
+        don_race_srtr_std == "ASIAN"   ~ "Asian",
+        don_race_srtr_std == "WHITE"   ~ "White",
+        don_race_srtr_std == "BLACK"   ~ "Black or African American",
+        don_race_srtr_std == "NATIVE"  ~ "American Indian or Alaska Native",
+        don_race_srtr_std == "MULTI"   ~ "Multi-Racial",
+        don_race_srtr_std == "PACIFIC" ~ "Native Hawaiian or Other Pacific Islander",
+        don_race_srtr_std == ""        ~ "NOT SPECIFIED",
+        TRUE ~ don_race_srtr_std #For all rows that did not match any of the previous recoding conditions, keep the original value
+      )
+    )
+```
+
+
+```{r}
+liver_data_clean_1 |>
+  count(tx_year, don_race_srtr_std) |>
+  group_by(tx_year) |>
+  mutate(pct = n / sum(n)) |>
+  ungroup() |>
+  ggplot(aes(x = tx_year, y = pct, fill = don_race_srtr_std)) +
+  geom_col(color = "white") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Distribution of Donor Race by Transplant Year",
+    x = "Transplant Year",
+    y = "Percent",
+    fill = "Donor Race"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+-------------------------------------------------------------------
 
 ```{r}
 liver_data = liver_data_raw |> 
@@ -32,7 +100,6 @@ filter(!is.na(PERS_ID) & !is.na(tx_date) & tx_year >= 2020 & REC_AGE_AT_TX >= 18
 arrange(PERS_ID, tx_date) |> 
   janitor::clean_names()
 ```
-
 
 Looking at race:
 ```{r}
@@ -72,14 +139,19 @@ liver_data |>
 ```
 
 
-
 ```{r}
-liver_data_clean |> 
-  distinct(don_race_srtr)
+#liver_data_clean |> 
+#  distinct(don_race_srtr)
 
 liver_data_clean = 
-  liver_data_clean |>
+  liver_data |>
     mutate(
+      don_ty_factor = case_when(
+      don_ty == "C" ~ "Deceased Donor",
+      don_ty == "L" ~ "Living Donor",
+      TRUE          ~ "Other / Unknown"),
+    don_ty_factor = factor(don_ty_factor, levels = c("Deceased Donor", "Living Donor", "Other / Unknown")),
+    
       don_race_srtr_std = don_race_srtr,
       don_race_srtr_std = case_when(
         don_race_srtr_std == "ASIAN"   ~ "Asian",
@@ -95,6 +167,188 @@ liver_data_clean =
   
 
 ```
+
+Race breakdown since 2020 annually for all donors 
+```{r}
+liver_data_clean |>
+  count(tx_year, don_race_srtr_std) |>
+  group_by(tx_year) |>
+  mutate(pct = n / sum(n)) |>
+  ungroup() |>
+  ggplot(aes(x = tx_year, y = pct, fill = don_race_srtr_std)) +
+  geom_col(color = "white") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Distribution of Donor Race by Transplant Year",
+    x = "Transplant Year",
+    y = "Percent",
+    fill = "Donor Race"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+
+Side by side Deceased vs Living Donor Race Break Down (combining years 2020-2025)
+```{r}
+interactive_race = liver_data_clean |>
+  filter(don_ty %in% c("C", "L")) |>
+  count(don_ty_factor, don_race_srtr_std) |>
+  group_by(don_ty_factor) |>
+  mutate(pct = n / sum(n)) |>
+  ungroup() |>
+  ggplot(aes(x = don_ty_factor, 
+             y = pct, 
+             fill = don_race_srtr_std,
+             text = paste0(
+      "Donor Type: ", don_ty_factor, "<br>",
+      "Race: ", don_race_srtr_std, "<br>",
+      "Percent: ", scales::percent(pct, accuracy = 0.1), "<br>",
+      "Count: ", n
+    ))) +
+  geom_col(color = "white") +
+  scale_y_continuous(labels = percent_format()) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Donor Race Composition by Donor Type",
+    x = "Donor Type",
+    y = "Percent of Donors",
+    fill = "Race"
+  )+
+  theme_minimal()
+```
+
+Interactive Version:
+```{r}
+ggplotly(interactive_race, tooltip = "text")
+```
+
+
+Exploratory: Look at deceased vs living donors and gender
+
+```{r}
+liver_data_clean |> count(don_ty)
+liver_data_clean |> count(don_gender)
+liver_data_clean |> filter(don_ty == "L" | don_ty == "C") |> count(don_gender)
+liver_data_clean |> filter(don_ty == "C") |> count(don_gender)
+liver_data_clean |> filter(don_ty == "L") |> count(don_gender)
+
+```
+
+Exploratory: Look at citizenship
+```{r}
+liver_data_clean |> count(don_citizenship)
+#916 NA values
+
+#Code	Description
+#1	1: US Citizen
+#2	2: Resident Alien
+#3	3: Non-Resident Alien, Specify Country
+#4	4: Non-US Citizen/US Resident
+#5	5: Non-US Citizen/Non-US Resident
+#998	998: Unknown
+```
+
+```{r}
+
+liver_data_clean <- liver_data_clean |>
+  mutate(
+    don_citizenship_label = case_when(
+      don_citizenship == 1 ~ "US Citizen",
+      don_citizenship == 2 ~ "Resident Alien",
+      don_citizenship == 3 ~ "Non-Resident Alien (Specify)",
+      don_citizenship == 4 ~ "Non-US Citizen/US Resident",
+      don_citizenship == 5 ~ "Non-US Citizen/Non-US Resident",
+      don_citizenship == 998 ~ "Unknown",
+      is.na(don_citizenship) ~ "Missing",
+      TRUE ~ "Other"
+    ),
+    don_ty_label = case_when(
+      don_ty == "C" ~ "Deceased Donor",
+      don_ty == "L" ~ "Living Donor",
+      TRUE          ~ "Other / Unknown"
+    )
+  )
+```
+
+Stacked barchart of citizenship: Decesased v Living Donor
+```{r}
+
+liver_data_clean |>
+  filter(don_ty %in% c("C", "L")) |>   # only deceased + living
+  count(don_ty_label, don_citizenship_label) |>
+  group_by(don_ty_label) |>
+  mutate(pct = n / sum(n)) |>
+  ungroup() |>
+  ggplot(aes(x = don_ty_label, y = pct, fill = don_citizenship_label)) +
+  geom_col(color = "white") +
+  scale_y_continuous(labels = percent_format()) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Donor Citizenship Status by Donor Type",
+    x = "Donor Type",
+    y = "Percent of Donors",
+    fill = "Citizenship"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(size = 11),
+    legend.position = "right"
+  )
+```
+
+Interactive plotly version
+```{r}
+
+plotly_citizenship = liver_data_clean |>
+  filter(don_ty %in% c("C", "L")) |>   # only deceased + living
+  count(don_ty_label, don_citizenship_label) |>
+  group_by(don_ty_label) |>
+  mutate(pct = n / sum(n)) |>
+  ungroup() |>
+  ggplot(aes(
+    x = don_ty_label,
+    y = pct,
+    fill = don_citizenship_label,
+    text = paste0(
+      "Donor type: ", don_ty_label, "<br>",
+      "Citizenship: ", don_citizenship_label, "<br>",
+      "Percent: ", scales::percent(pct, accuracy = 0.1), "<br>",
+      "Count: ", n
+    )
+  )) +
+  geom_col(color = "white") +
+  scale_y_continuous(labels = percent_format()) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Donor Citizenship Status by Donor Type",
+    x = "Donor Type",
+    y = "Percent of Donors",
+    fill = "Citizenship"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(size = 11),
+    legend.position = "right"
+  )
+
+
+ggplotly(plotly_citizenship, tooltip = "text")
+```
+
+
+
+
+
+-------------------------------
+OTHER:
+
 
 ```{r}
 # Visualise don_race
@@ -114,26 +368,6 @@ liver_data_clean |>
   theme_minimal() +
   xlim(0, max(liver_data_clean |> count(don_race) |> pull(n)) * 1.15)
 ```
-
-
-Plot for don_Race_srtr_std:
-```{r}
-liver_data_clean |>
-  count(don_race_srtr_std, sort = TRUE) |>
-  mutate(pct = n / sum(n) * 100) |>
-  ggplot(aes(x = n, y = reorder(don_race_srtr_std, n))) +
-  geom_col(fill = "steelblue") +
-  geom_text(aes(label = paste0(round(pct, 3), "%")), 
-            hjust = -0.1, size = 3.5) +
-  labs(
-    title = "Distribution of Donor Race",
-    x = "Count",
-    y = "Race"
-  ) +
-  theme_minimal() +
-  xlim(0, max(liver_data_clean |> count(don_race_srtr_std) |> pull(n)) * 1.15)
-```
-
 
 Check for mismatches between don_race and don_race_srtr (but actually don_Race_srtr_std)
 ```{r}
@@ -159,39 +393,87 @@ mismatched_race_y =
 
 ```
 
-
-Look at deceased vs living donors and gender
-
+Plot for DECEASED don_Race_srtr_std:
 ```{r}
-liver_data_clean |> count(don_ty)
-liver_data_clean |> count(don_gender)
-liver_data_clean |> filter(don_ty == "L" | don_ty == "C") |> count(don_gender)
-liver_data_clean |> filter(don_ty == "C") |> count(don_gender)
-liver_data_clean |> filter(don_ty == "L") |> count(don_gender)
-
+liver_data_clean |>
+  filter(don_ty == "L") |> 
+  count(don_race_srtr_std, sort = TRUE) |>
+  mutate(pct = n / sum(n) * 100) |>
+  ggplot(aes(x = n, y = reorder(don_race_srtr_std, n))) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = paste0(round(pct, 2), "%")), 
+            hjust = -0.1, size = 3.5) +
+  labs(
+    title = "Distribution of Living Donor Race",
+    x = "Count",
+    y = "Race"
+  ) +
+  theme_minimal() +
+  xlim(0, 10000)
 ```
 
-Look at citizenship
-```{r}
-liver_data_clean |> count(don_citizenship)
-#916 NA values
 
-#Code	Description
-#1	1: US Citizen
-#2	2: Resident Alien
-#3	3: Non-Resident Alien, Specify Country
-#4	4: Non-US Citizen/US Resident
-#5	5: Non-US Citizen/Non-US Resident
-#998	998: Unknown
+Plot for DECEASED don_Race_srtr_std:
+```{r}
+liver_data_clean |>
+  filter(don_ty == "C") |> 
+  count(don_race_srtr_std, sort = TRUE) |>
+  mutate(pct = n / sum(n) * 100) |>
+  ggplot(aes(x = n, y = reorder(don_race_srtr_std, n))) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = paste0(round(pct, 2), "%")), 
+            hjust = -0.1, size = 3.5) +
+  labs(
+    title = "Distribution of Deceased Donor Race",
+    x = "Count",
+    y = "Race"
+  ) +
+  theme_minimal() +
+  xlim(0, 160000)
 ```
 
+Plot for don_Race_srtr_std:
+```{r}
+liver_data_clean |>
+  count(don_race_srtr_std, sort = TRUE) |>
+  mutate(pct = n / sum(n) * 100) |>
+  ggplot(aes(x = n, y = reorder(don_race_srtr_std, n))) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = paste0(round(pct, 3), "%")), 
+            hjust = -0.1, size = 3.5) +
+  labs(
+    title = "Distribution of Donor Race",
+    x = "Count",
+    y = "Race"
+  ) +
+  theme_minimal() +
+  xlim(0, max(liver_data_clean |> count(don_race_srtr_std) |> pull(n)) * 1.15)
+```
+
+Bar chart of citizenship
+```{r}
+
+liver_data_clean |>
+count(don_citizenship_label) |>
+  mutate(pct = n / sum(n)) |>
+  ggplot(aes(x = pct, y = fct_reorder(don_citizenship_label, pct))) +
+  geom_col() +
+  geom_text(aes(label = percent(pct, accuracy = 0.1)),
+            hjust = -0.1, size = 3.3) +
+  scale_x_continuous(labels = percent_format(), expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    title = "Donor Citizenship Status",
+    x = "Percent of Donors",
+    y = "Citizenship"
+  )
+```
 
 Donor cause of death:
 ```{r}
 
 liver_data_clean |> count(don_cad_don_cod)
-#7120 NA values
 
+#7120 NA values
 #Code	Description
 #1	1: ANOXIA
 #2	2: CEREBROVASCULAR/STROKE
@@ -243,42 +525,6 @@ liver_data_clean |> count(don_death_circum)
 ```
 
 
-Plot for DECEASED don_Race_srtr_std:
-```{r}
-liver_data_clean |>
-  filter(don_ty == "C") |> 
-  count(don_race_srtr_std, sort = TRUE) |>
-  mutate(pct = n / sum(n) * 100) |>
-  ggplot(aes(x = n, y = reorder(don_race_srtr_std, n))) +
-  geom_col(fill = "steelblue") +
-  geom_text(aes(label = paste0(round(pct, 2), "%")), 
-            hjust = -0.1, size = 3.5) +
-  labs(
-    title = "Distribution of Deceased Donor Race",
-    x = "Count",
-    y = "Race"
-  ) +
-  theme_minimal() +
-  xlim(0, 160000)
-```
 
 
-Plot for DECEASED don_Race_srtr_std:
-```{r}
-liver_data_clean |>
-  filter(don_ty == "L") |> 
-  count(don_race_srtr_std, sort = TRUE) |>
-  mutate(pct = n / sum(n) * 100) |>
-  ggplot(aes(x = n, y = reorder(don_race_srtr_std, n))) +
-  geom_col(fill = "steelblue") +
-  geom_text(aes(label = paste0(round(pct, 2), "%")), 
-            hjust = -0.1, size = 3.5) +
-  labs(
-    title = "Distribution of Living Donor Race",
-    x = "Count",
-    y = "Race"
-  ) +
-  theme_minimal() +
-  xlim(0, 10000)
-```
 
