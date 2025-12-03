@@ -14,7 +14,7 @@ library(ggplot2)
 library(scales)
 library(forcats)
 library(plotly)
-
+library(kableExtra)
 ```
 
 
@@ -237,6 +237,8 @@ liver_data_clean |> filter(don_ty == "L" | don_ty == "C") |> count(don_gender)
 liver_data_clean |> filter(don_ty == "C") |> count(don_gender)
 liver_data_clean |> filter(don_ty == "L") |> count(don_gender)
 
+
+liver_data_clean |> count(don_relationship_ty)
 ```
 
 Exploratory: Look at citizenship
@@ -342,8 +344,357 @@ plotly_citizenship = liver_data_clean |>
 ggplotly(plotly_citizenship, tooltip = "text")
 ```
 
+Interactive: Donor Gender
+```{r}
+gender_interactive = liver_data_clean |>
+  filter(don_ty %in% c("C", "L")) |>
+  count(don_ty_factor, don_gender) |>
+  group_by(don_ty_factor) |>
+  mutate(pct = n / sum(n),
+        don_gender = case_when(
+        don_gender == "M" ~ "Male",
+        don_gender == "F" ~ "Female",
+        TRUE ~ don_gender
+    )) |>
+  ungroup() |>
+  ggplot(aes(
+    x = don_ty_factor,
+    y = pct,
+    fill = don_gender,
+    text = paste0(
+      "Donor Type: ", don_ty_factor, "<br>",
+      "Gender: ", don_gender, "<br>",
+      "Percent: ", scales::percent(pct, accuracy = 0.1), "<br>",
+      "Count: ", n
+    )
+  )) +
+  geom_col(color = "white") +
+  scale_y_continuous(labels = percent_format()) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Donor Gender Composition by Donor Type",
+    x = "Donor Type",
+    y = "Percent of Donors",
+    fill = "Gender"
+  ) +
+  theme_minimal()
+
+ggplotly(gender_interactive, tooltip = "text")
+```
+------------------------------
+
+RECIPIENT INFO
 
 
+CLEAN THE DATA
+```{r}
+liver_data_clean = liver_data_clean |>
+  mutate(
+    can_gender = factor(
+      can_gender,
+      levels = c("F", "M"),
+      labels = c("Female", "Male")),
+    can_race_srtr_std = can_race_srtr,
+    can_race_srtr_std = case_when(
+      can_race_srtr_std == "ASIAN"   ~ "Asian",
+      can_race_srtr_std == "WHITE"   ~ "White",
+      can_race_srtr_std == "BLACK"   ~ "Black or African American",
+      can_race_srtr_std == "NATIVE"  ~ "American Indian or Alaska Native",
+      can_race_srtr_std == "MULTI"   ~ "Multi-Racial",
+      can_race_srtr_std == "PACIFIC" ~ "Native Hawaiian or Other Pacific Islander",
+      can_race_srtr_std == ""        ~ "NOT SPECIFIED",
+      TRUE                           ~ can_race_srtr_std
+    )
+  )
+
+```
+
+Race dsitribution from 2020 to 2025
+```{r}
+race_donor_int = liver_data_clean |>
+  count(tx_year, can_race_srtr_std) |>
+  group_by(tx_year) |>
+  mutate(pct = n / sum(n)) |>
+  ungroup() |>
+  ggplot(aes(x = tx_year, 
+             y = pct, 
+             fill = can_race_srtr_std,
+             text = paste0(
+      "Year: ", tx_year, "<br>",
+      "Race: ", can_race_srtr_std, "<br>",
+      "Percent: ", scales::percent(pct, accuracy = 0.1), "<br>",
+      "Count: ", n)
+      )) +
+  geom_col(color = "white") +
+  scale_y_continuous(labels = percent_format()) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Distribution of Recipient Race by Transplant Year",
+    x = "Transplant Year",
+    y = "Percent of Recipients",
+    fill = "Race"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank()
+  )
+
+ggplotly(race_donor_int, tooltip = "text")
+```
+
+Gender of Recipients
+```{r}
+gender_donor_int = liver_data_clean |>
+  count(can_gender) |>
+  mutate(pct = n / sum(n)) |>
+  ggplot(aes(x = "All Recipients", 
+             y = pct, 
+             fill = can_gender,
+             text = paste0(
+      "Gender: ", can_gender, "<br>",
+      "Percent: ", scales::percent(pct, accuracy = 0.1), "<br>",
+      "Count: ", n)
+      )) +
+  geom_col(color = "white") +
+  scale_y_continuous(labels = percent_format()) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Overall Recipient Gender Composition",
+    x = "",
+    y = "Percent of Recipients",
+    fill = "Gender"
+  ) +
+  theme_minimal()
+
+ggplotly(gender_donor_int, tooltip = "text")
+```
+
+Age distribution of Donors and Recipients 
+
+```{r}
+liver_data_clean |>
+  select(don_age, rec_age_at_tx) |>
+  tidyr::pivot_longer(cols = everything(),
+                      names_to = "type",
+                      values_to = "age") |>
+  mutate(
+    type = factor(type,
+                  levels = c("don_age", "rec_age_at_tx"),
+                  labels = c("Donor", "Recipient"))
+  ) |>
+  ggplot(aes(x = age, fill = type)) +
+  geom_density(alpha = 0.4) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Comparison of Donor and Recipient Age Distributions",
+    x = "Age (years)",
+    y = "Density",
+    fill = "Group"
+  ) +
+  theme_minimal()
+```
+
+
+Age difference between donor and recipients
+```{r}
+liver_data_clean = liver_data_clean |>
+  mutate(
+    age_diff = don_age - rec_age_at_tx   # positive means donor older than recipient
+  )
+
+```
+
+Histogram of Age Difference
+```{r}
+liver_data_clean |>
+  ggplot(aes(x = age_diff)) +
+  geom_histogram(binwidth = 2, fill = "steelblue", color = "white") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Distribution of Donor–Recipient Age Differences",
+    x = "Donor Age – Recipient Age (years)",
+    y = "Count"
+  ) +
+  theme_minimal()
+```
+
+
+Calculate the mean and standard deviation
+```{r}
+age_stats = liver_data_clean |>
+  summarise(
+    mean = mean(age_diff, na.rm = TRUE),
+    sd   = sd(age_diff, na.rm = TRUE)
+  )
+
+mu = age_stats$mean
+sigma = age_stats$sd
+
+```
+
+Histogram with Normal Distribution Line
+```{r}
+n <- nrow(liver_data_clean)
+
+liver_data_clean |>
+  ggplot(aes(x = age_diff)) +
+  geom_histogram(
+    binwidth = 2,
+    fill = "steelblue",
+    color = "white",
+    alpha = 0.85
+  ) +
+  # Add normal curve
+  stat_function(
+    fun = function(x) n * 2 * dnorm(x, mean = mu, sd = sigma),
+    color = "red",
+    linewidth = 0.8
+  ) +
+  # Zero line
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  labs(
+    title = "Distribution of Donor–Recipient Age Differences",
+    subtitle = paste0("Normal Curve: mean = ", round(mu,1), 
+                      ", sd = ", round(sigma,1)),
+    x = "Donor Age – Recipient Age (years)",
+    y = "Count"
+  ) +
+  theme_minimal()
+```
+
+
+Donor - Recipient Age Difference based on Living and Deceased Donor 
+```{r}
+liver_data_clean |>
+  filter(don_ty %in% c("C", "L")) |>
+  mutate(
+    don_ty_label = ifelse(don_ty == "C", "Deceased Donor", "Living Donor")
+  ) |>
+  ggplot(aes(x = don_ty_label, y = age_diff, fill = don_ty_label)) +
+  geom_boxplot(alpha = 0.8) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Donor–Recipient Age Difference by Donor Type",
+    x = "",
+    y = "Donor Age – Recipient Age (years)",
+    fill = "Donor Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+-------------------------------
+Exploratory: Does race match?
+
+Make a variable that says if they match
+```{r}
+liver_data_clean = liver_data_clean |>
+  mutate(
+    race_match = ifelse(
+      don_race_srtr_std == can_race_srtr_std,
+      "Matched",
+      "Mismatched"
+    )
+  )
+```
+
+Overall Race Match
+- Just to be written in the report
+```{r}
+liver_data_clean |>
+  count(race_match) |>
+  mutate(pct = n / sum(n))
+```
+
+```{r}
+liver_data_clean |>
+  count(can_race_srtr_std, race_match) |>
+  group_by(can_race_srtr_std) |>
+  mutate(pct = n / sum(n))
+```
+
+Heat Map
+```{r}
+liver_data_clean |>
+  count(can_race_srtr_std, don_race_srtr_std) |>
+  group_by(can_race_srtr_std) |>
+  mutate(pct = n / sum(n)) |>
+  ggplot(aes(
+    x = don_race_srtr_std,
+    y = can_race_srtr_std,
+    fill = pct
+  )) +
+  geom_tile(color = "white") +
+scale_fill_gradient(
+  low = "#eff3ff" ,
+  high = "#08519c" ,
+  labels = scales::percent
+) +
+labs(
+  title = "Donor–Recipient Race Matching Matrix (%)",
+  x = "Donor Race",
+  y = "Recipient Race",
+  fill = "Percent"
+) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+
+Make variable to see if race matches 
+```{r}
+
+race_match_by_don_type <- liver_data_clean |>
+  mutate(
+    # Clean donor type
+    don_ty_label = case_when(
+      don_ty == "C" ~ "Deceased Donor",
+      don_ty == "L" ~ "Living Donor",
+      TRUE ~ NA_character_
+    ),
+    
+    # Define race match variable
+    race_match = ifelse(
+      don_race_srtr_std == can_race_srtr_std,
+      "Matched",
+      "Mismatched"
+    )
+  ) |>
+  filter(!is.na(don_ty_label)) |>   # remove any NA donor types
+  count(don_ty_label, race_match) |>
+  group_by(don_ty_label) |>
+  mutate(
+    pct = n / sum(n),
+    pct_fmt = scales::percent(pct, accuracy = 0.1)
+  ) |>
+  ungroup()
+```
+
+
+```{r}
+race_match_by_don_type_wide <- race_match_by_don_type |>
+  select("Donor Type" = don_ty_label, 
+         race_match, pct_fmt) |>
+  tidyr::pivot_wider(
+    names_from = race_match,
+    values_from = pct_fmt
+  )
+
+race_match_by_don_type_wide |>
+  kable(
+    format = "html",
+    caption = "Race Match Rate by Donor Type",
+    align = c("l", "r", "r")
+  ) |>
+  kable_styling(
+    bootstrap_options = c("striped", "hover"),
+    full_width = FALSE
+  )
+```
 
 
 -------------------------------
@@ -524,6 +875,14 @@ liver_data_clean |> count(don_death_circum)
 #998	998: UNKNOWN
 ```
 
+Histogram (Race match vs mismatch between donor and recipient):
+```{r}
+liver_data_clean |>
+  count(race_match) |>
+  ggplot(aes(x = race_match, y = n, fill = race_match)) +
+  geom_col() +
+  labs(title = "Overall Donor–Recipient Race Match")
+```
 
 
 
